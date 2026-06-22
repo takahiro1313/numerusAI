@@ -4,60 +4,92 @@
 「翌月の成約数」を予測できるように、活動→成約にリードタイム（ラグ）を持たせる。
 結果系（契約数）は入れない（自明回避）。実データは一切使わない（要件 §4）。
 
-生データ列: 営業担当, 月, 問い合わせ数, 架電数, 面談数, 案件提案数, 成約数
-（ラグ特徴量づくりと「翌月成約」へのズラしは ai_core.py 側で行う＝🔒前処理）
+担当者名はデモで読み上げやすい実名にする（要件・ユーザー指定）:
+  - 固定名（成約 多い）: 濵田隼人 / 大林ふみ / 佐藤周治 / 兵頭大志 / 川端須開
+  - 固定名（成約 少ない）: 斎藤貴大 / 黒須ひろとし / 谷本りゅうき
+  - 残りはランダムな氏名
+多寡は「面談・案件提案のベース水準」を上下させて作る（架電は据え置き＝架電は効かない指標のまま）。
 
-実行:
-    python make_dummy.py
-出力:
-    data/activities.csv
+生データ列: 営業担当, 月, 問い合わせ数, 架電数, 面談数, 案件提案数, 成約数
+
+実行:  python make_dummy.py  → data/activities.csv
 """
 
 import os
 import numpy as np
 import pandas as pd
 
-N_REPS = 30          # 営業担当の人数
-N_MONTHS = 30        # 月数（1..30）
+N_REPS = 75          # 営業担当の人数（固定8名 ＋ ランダム67名）
+N_MONTHS = 12        # 月数（1〜12月。暦の月に合わせる）
 SEED = 42
 
-# 先行活動（結果系=契約数は含めない）
 ACT_COLS = ["問い合わせ数", "架電数", "面談数", "案件提案数"]
 TARGET_COL = "成約数"
+
+# 固定名（デモで使う）。成約が「多い人」「少ない人」を仕込む。
+HIGH_NAMES = ["濵田隼人", "大林ふみ", "佐藤周治", "兵頭大志", "川端須開"]
+LOW_NAMES = ["斎藤貴大", "黒須ひろとし", "谷本りゅうき"]
+
+# ランダム氏名の素（残り67名分。固定名と重複しないよう後で除外）
+SURNAMES = [
+    "鈴木", "高橋", "田中", "伊藤", "渡辺", "山本", "中村", "小林", "加藤", "吉田",
+    "山田", "佐々木", "山口", "松本", "井上", "木村", "清水", "山崎", "森", "池田",
+    "橋本", "阿部", "石川", "前田", "藤田", "後藤", "岡田", "村上", "近藤", "坂本",
+    "遠藤", "青木", "藤井", "西村", "福田", "太田", "三浦", "岡本", "松田", "中島",
+]
+GIVEN = [
+    "翔太", "蓮", "陽斗", "大和", "悠真", "湊", "拓海", "健太", "駿", "直樹",
+    "和也", "涼介", "亮", "美咲", "さくら", "陽菜", "葵", "結衣", "彩", "遥",
+    "奈々", "裕子", "真由", "彩花", "千尋", "理恵", "麻衣", "智也", "京子", "桃子",
+]
+
+# 各活動の平均・ばらつき（担当ごとに独立に baseline を引く）
+ACT_MEAN_SD = {
+    "問い合わせ数": (45, 10),
+    "架電数": (85, 20),
+    "面談数": (28, 7),
+    "案件提案数": (9, 3),
+}
+# 成約の多寡をつくる「面談・案件提案」のベース倍率（架電・問い合わせは据え置き）
+DRIVER_COLS = {"面談数", "案件提案数"}
+PERF_MULT = {**{n: 1.4 for n in HIGH_NAMES}, **{n: 0.6 for n in LOW_NAMES}}  # 既定 1.0
+
+
+def build_rep_names(rng) -> list:
+    """固定8名 ＋ ランダム67名（重複なし）の担当者名リストを作る。"""
+    fixed = HIGH_NAMES + LOW_NAMES
+    pool = [s + g for s in SURNAMES for g in GIVEN if (s + g) not in fixed]
+    rng.shuffle(pool)
+    randoms = list(dict.fromkeys(pool))[: N_REPS - len(fixed)]
+    return fixed + randoms  # 固定名を先頭に（プレビューで実名が見える）
 
 
 def main():
     rng = np.random.default_rng(SEED)
+    rep_names = build_rep_names(rng)
     rows = []
 
-    # 各活動の平均・ばらつき（担当ごとに独立に baseline を引く＝活動間の共線性を避ける）
-    ACT_MEAN_SD = {
-        "問い合わせ数": (45, 10),
-        "架電数": (85, 20),
-        "面談数": (28, 7),
-        "案件提案数": (9, 3),
-    }
-
-    for rep in range(1, N_REPS + 1):
-        # 担当ごとに、活動ごと独立のベース水準（互いに相関しない）
-        base = {c: float(max(1.0, rng.normal(m, s))) for c, (m, s) in ACT_MEAN_SD.items()}
-        history = []  # 各月の dict(活動量)
+    for name in rep_names:
+        mult = PERF_MULT.get(name, 1.0)
+        # 面談・案件提案だけ倍率を掛ける（架電は据え置き＝効かない指標のまま）
+        base = {
+            c: float(max(1.0, rng.normal(m * (mult if c in DRIVER_COLS else 1.0), s)))
+            for c, (m, s) in ACT_MEAN_SD.items()
+        }
+        history = []
 
         for month in range(1, N_MONTHS + 1):
             act = {c: int(max(0, rng.poisson(base[c]))) for c in ACT_COLS}
             history.append(act)
 
             # 成約数(今月) = 「過去の」先行活動だけから決まる（リードタイムあり）。
-            # ・案件提案（1〜2ヶ月前）が最も効く、面談がそれを補助。
-            # ・問い合わせは弱く効く。架電は“あえて効かない指標”（量より質の示唆）。
-            # get(-2)=先月, get(-3)=先々月, get(-4)=3ヶ月前
             def get(idx, col):
                 return history[idx][col] if -len(history) <= idx < len(history) else 0
 
             lead = (
-                0.16 * get(-2, "案件提案数")     # 先月の提案が最重要
-                + 0.12 * get(-3, "案件提案数")   # 先々月の提案も効く
-                + 0.06 * get(-2, "面談数")       # 先月の面談
+                0.16 * get(-2, "案件提案数")      # 先月の提案が最重要
+                + 0.12 * get(-3, "案件提案数")    # 先々月の提案も効く
+                + 0.06 * get(-2, "面談数")        # 先月の面談
                 + 0.03 * get(-3, "面談数")
                 + 0.012 * get(-4, "問い合わせ数")  # 入口は弱く効く
                 # 架電数は意図的に係数ゼロ（効かない指標）
@@ -65,14 +97,7 @@ def main():
             noise = rng.normal(0, 1.0)
             seiyaku = int(np.clip(round(lead + noise), 0, None))
 
-            rows.append(
-                {
-                    "営業担当": f"担当{rep:02d}",
-                    "月": month,
-                    **act,
-                    TARGET_COL: seiyaku,
-                }
-            )
+            rows.append({"営業担当": name, "月": month, **act, TARGET_COL: seiyaku})
 
     df = pd.DataFrame(rows, columns=["営業担当", "月", *ACT_COLS, TARGET_COL])
 
@@ -80,8 +105,9 @@ def main():
     out = os.path.join("data", "activities.csv")
     df.to_csv(out, index=False, encoding="utf-8-sig")
     print(f"生成しました: {out}（{len(df)}行＝{N_REPS}担当 × {N_MONTHS}ヶ月）")
-    print(df.head(8))
-    print("\n成約数の分布:", df[TARGET_COL].value_counts().sort_index().to_dict())
+    avg = df.groupby("営業担当")[TARGET_COL].mean()
+    print("成約 多い固定名:", {n: round(avg[n], 1) for n in HIGH_NAMES})
+    print("成約 少ない固定名:", {n: round(avg[n], 1) for n in LOW_NAMES})
 
 
 if __name__ == "__main__":

@@ -1,55 +1,62 @@
 # 数値AI（先行活動→来月の成約数予測）ハンズオンアプリ
 
-「数字を入れたら数字が出る」を、fit（学習）/ predict（推論）を自分で書いて体験するStreamlitアプリ。
-題材は **営業の先行活動 → 翌月の成約数を予測**（フォーキャスト・XGBoost）。「来月どれくらい取れそう？」に答える。
+「データから予測する」を、`fit`（学習）/ `predict`（推論）を**アプリ内の編集セルに書いて**体験するStreamlitアプリ。
+題材は **営業の先行活動 → 翌月の成約数を予測**（XGBoost / 線形回帰）。
+通しテーマの②＝「**AIがデータからルールを学ぶ**」パート（[`../../00_共通/ハンズオン通しテーマ_一枚絵.md`](../../00_共通/ハンズオン通しテーマ_一枚絵.md)）。
+IT①が「人が if を書く」だったのに対し、ここは「AIがルールを学ぶ」。
+
+> **実行環境＝Community Cloud にデプロイして使う**。学習・推論の計算が役員PCには重いため、サーバ側（Cloud）で実行する。参加者は配布URLを開き、**アプリ内の編集セル**に fit/predict を書く。
 
 ## ファイル
 
 | ファイル | 役割 |
 |---|---|
-| `app_ensyu.py` | **演習用**（参加者に配布）。fit/predict が空欄（`___`） |
-| `app_seikai.py` | **正解用**（講師リファレンス）。記入済みでそのまま動く |
-| `ai_core.py` | 共通ロジック（データ・モデル・exec実行・描画） |
+| `app_ensyu.py` | **演習用**（参加者に配布・デプロイ）。編集セルが空欄（`___`）。1ファイル完結 |
+| `app_seikai.py` | **正解用**（講師リファレンス）。記入済みでそのまま動く。裏方・画面は演習用と同一 |
 | `make_dummy.py` | ダミーCSV生成スクリプト |
-| `data/activities.csv` | ダミー時系列（900行＝30担当×30ヶ月・SFDCイメージ） |
+| `data/activities.csv` | ダミー時系列（**900行＝75担当 × 12ヶ月**・SFDCイメージ） |
+| `data/予測結果.csv` | **学習が通ると自動生成**：全担当の来月予測。**③まーぴーが読む**（連結） |
 | `requirements.txt` | 依存（streamlit / xgboost / pandas / scikit-learn / numpy） |
-
-## ローカル起動
-
-```bash
-pip install -r requirements.txt
-python make_dummy.py            # data/activities.csv が無ければ生成
-streamlit run app_ensyu.py     # 参加者用（空欄）
-streamlit run app_seikai.py    # 講師用（正解・答え合わせ）
-```
-
-> Mac ローカルで xgboost が `libomp.dylib` 不足で動かない場合は `brew install libomp` を一度実行。
-> Streamlit Community Cloud（Linux）では不要。
-
-## 当日の触り方（演習用・スライド53 Step1-4）
-
-1. **Step1 データを見る**（🔒）：担当×月の活動量と成約数（時系列）の形を確認
-2. **Step2 学習する**（🟢）：`model.fit(___, ___)` の `___` に `X_train, y_train` を入れ → 🎓 学習ボタン
-3. **Step3 推論する**（🟢）：営業担当を選び、`model.predict(___)` の `___` に `X_new` を入れ → 🔮 推論ボタン → その担当の翌月予測成約数
-4. **Step4 パラメータを変える**（🟢）：`n_estimators` / `max_depth` を上げて学習し直す
-   → 訓練スコア↑なのに検証スコア↓＝**過学習**を train/val 対比で体感（検証は時間分割＝未来の月）
-
-> 正解は `app_seikai.py`（fit/predict 記入済み）。
 
 ## デプロイ（Streamlit Community Cloud）
 
-- **Python は 3.11**（デプロイ時の Advanced settings で Python 3.11 を選択）。
-- メイン実行ファイルは `app_ensyu.py`（受講生が**学習・推論を試す**アプリ。事前デプロイ必須）。
-- **1人1URL（計5）** を別々にデプロイし、URLを配布。
-- `data/activities.csv` をリポジトリに含めて配置（無い場合は `make_dummy.py` で生成してからコミット）。
-- セッション前に**全URLをウォームアップ**。XGBoost を含むため初回ビルドに時間がかかる場合あり。
-- 予備URLを1つ用意しておくと安心。
+- **Main file path** に `app_ensyu.py`、**Python 3.11**（Advanced settings）。
+- `data/activities.csv` を同梱（無ければ `make_dummy.py` で生成・コミット）。
+- **1人1URL（計5）＋予備1**（学習負荷を分散）。講師用に `app_seikai.py` を1つ。
+- セッション前に**全URLをウォームアップ**。詳細は [`../../00_共通/デプロイ運用メモ.md`](../../00_共通/デプロイ運用メモ.md)。
+
+## ローカル確認
+
+```bash
+pip install -r requirements.txt
+python make_dummy.py            # data/activities.csv を生成
+streamlit run app_ensyu.py
+```
+> Mac で xgboost が `libomp.dylib` 不足の場合 `brew install libomp` を一度実行。
+
+## 当日の触り方（演習用）
+
+配布URLを開き、🟢の編集セルだけを触る：
+
+1. **Step1 データを見る**（🔒）：手がかり(X)＝活動4種／答え(y)＝翌月の成約数 を確認
+2. **Step2 モデルを選ぶ**（🟢）：**木のモデル / 直線モデル** とパラメータ（n_estimators / max_depth）
+3. **Step3 学習する**（🟢）：編集セルに `model.fit(X_train, y_train)` を書く → 🎓 学習
+4. **Step4 推論する**（🟢）：担当を選び `pred = model.predict(X_new)` を書く → 🔮 推論 → 来月予測
+5. **過学習を観察**：Step2の数字を上げて再学習 → 訓練◎なのに検証✕（train/val対比）
+
+> 編集セルに書いた fit/predict は**サーバ側（Cloud）で実行**（限定名前空間）。空欄だとエラー＝書く体験。
+> 既定 `40/2` はバランス良好、`300/6` に上げると過学習がはっきり出る。正解は `app_seikai.py`。
+
+## ③まーぴーとの連結
+
+- 学習が通ると、全担当の来月予測を `data/予測結果.csv` に自動保存。
+- ③のまーぴー（`03_GenAI`）がこのCSVを読み「担当◯◯の来月は△件」と音声で答える＝**一本の糸**。
+- ※AIはCloud／まーぴーはローカルで環境が別なので、当日はまーぴー同梱のサンプルCSV（または講師がCloudから書き出して配置）を使う（[`../../00_共通/デプロイ運用メモ.md`](../../00_共通/デプロイ運用メモ.md) §3）。
 
 ## 設計メモ
 
-- 学習・推論はすべてサーバ側（数秒）。APIキー不要。
-- fit/predict は限定名前空間で `exec`。`import`/I/O は渡さない。例外は画面表示。
-- 過学習は train/val の R² 対比で可視化（検証は時間分割）。差が開くと警告を出す。
-- 重要度で「架電（量）より提案・面談が翌月成約に効く」が見える。
+- **アプリ内編集セル＋安全実行**：`fit`/`predict` の文字列を限定名前空間で `exec`。`import`/I/O は渡さない。例外は画面表示。
+- 過学習は train/val の R²対比で可視化（検証は時間分割＝過去で学習→未来で答え合わせ）。
+- 重要度（木モデル）で「架電（量）より提案・面談が翌月成約に効く」が見える。
 - データは**ダミーのみ**。本番SFDC/TSR等は載せない。
-- 詳細は `要件定義書.md` / `仕様設計書.md` を参照。
+- 詳細は `要件定義書.md` / `仕様設計書.md`。
